@@ -28,7 +28,7 @@ EXAMPLE_QUESTIONS = [
     "Who are the top 3 artists by number of tracks sold?",
 ]
 
-st.set_page_config(page_title=f"{AGENT_NAME} — Ask Your Data", page_icon="🎵", layout="centered")
+st.set_page_config(page_title=f"{AGENT_NAME} - Ask Your Data", page_icon="🎵", layout="centered")
 
 
 @st.cache_data(show_spinner=False)
@@ -112,7 +112,7 @@ if st.button("Ask", type="primary"):
     try:
         df, safe_sql = run_query(raw_sql)
     except SQLValidationError as e:
-        st.error(f"**Not run** — the generated query failed the safety check: {e}")
+        st.error(f"**Not run** - the generated query failed the safety check: {e}")
         with st.expander("What the model generated"):
             st.code(raw_sql, language="sql")
         st.stop()
@@ -126,7 +126,7 @@ if st.button("Ask", type="primary"):
         try:
             answer = summarize_result(question, safe_sql, df)
         except Exception:
-            answer = f"Found {len(df)} row(s) — see below."
+            answer = f"Found {len(df)} row(s) - see below."
 
     st.subheader(answer.replace("$", "\\$"))  # a bare $ would render as LaTeX math
     render_result(df)

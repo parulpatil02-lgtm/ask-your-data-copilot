@@ -1,13 +1,13 @@
-# Melody — Ask-Your-Data Copilot
+# Melody - Ask-Your-Data Copilot
 
 **Business users ask a question in plain English and get a checked answer in
-seconds — without joining the analyst queue, and without an AI quietly guessing.**
+seconds - without joining the analyst queue, and without an AI quietly guessing.**
 
 ## The business problem
 
 Every analytics team has the same bottleneck: business users need one-off numbers,
 only analysts can write the SQL, so requests pile up and people wait. The obvious
-fix — let an LLM write the SQL — creates two new problems: it can be confidently
+fix - let an LLM write the SQL - creates two new problems: it can be confidently
 *wrong*, and it can run something destructive. Melody is an attempt to remove the
 queue without either risk.
 
@@ -42,10 +42,10 @@ query as ground truth.
 
 | | Naive baseline (schema-only prompt) | Melody |
 |---|---|---|
-| Correct answers | **7 / 9** in both runs — but *different* questions failed each run | **9 / 9** on every run (4 runs) |
+| Correct answers | **7 / 9** in both runs - but *different* questions failed each run | **9 / 9** on every run (4 runs) |
 | Example of a wrong answer | Avg tracks per playlist: 622.5 (true: 484.2); a percentage query that errored | Both fixed and covered by tests |
-| Time to a written answer | — | **median 1.6 s, max 3.4 s** (SQL + run + summary) |
-| Destructive or out-of-scope requests | — | Refused or blocked; database opened read-only; 23 safety checks pass |
+| Time to a written answer | - | **median 1.6 s, max 3.4 s** (SQL + run + summary) |
+| Destructive or out-of-scope requests | - | Refused or blocked; database opened read-only; 23 safety checks pass |
 
 Two honest notes. The baseline's failures *moving around* between runs is itself
 the point: without ground-truth tests you can't tell which answers are wrong. And
@@ -75,9 +75,9 @@ question ──► Gemini writes one SELECT ──► validator ──► read-o
 ## Safety, and how it's tested
 
 Two independent layers: the validator, and an engine-level read-only connection.
-`test_guardrails.py` runs 23 checks — DROP/DELETE/UPDATE/INSERT/REPLACE INTO/
+`test_guardrails.py` runs 23 checks - DROP/DELETE/UPDATE/INSERT/REPLACE INTO/
 ATTACH/PRAGMA, multi-statement injection, comment-hidden statements,
-`WITH … DELETE` — plus legitimate queries that must still work (searching for
+`WITH … DELETE` - plus legitimate queries that must still work (searching for
 "Create", using `REPLACE()`, ending in a comment) and a direct attempt to write
 through the connection. The model itself also refused both destructive requests I
 tried ("delete every customer", "drop the Invoice table"), but the design doesn't
@@ -125,7 +125,7 @@ copy .env.example .env        # then put your free Gemini key in .env
 ```
 
 Get a free key at [aistudio.google.com/apikey](https://aistudio.google.com/apikey).
-Restart the server after editing `agent.py` or `db.py` — I saw stale behaviour from
+Restart the server after editing `agent.py` or `db.py` - I saw stale behaviour from
 a long-running server until I did.
 
 ```bash
