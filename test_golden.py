@@ -5,16 +5,25 @@ must match it. Run this after ANY change to the prompts -- fixing one
 question can silently break another (this suite exists because that
 happened).
 
-Run:  python test_golden.py      (needs GEMINI_API_KEY; uses ~1 API call per case)
+Run:  python test_golden.py              (needs GEMINI_API_KEY)
+      python test_golden.py --baseline   same questions, but with a bare schema-only
+                                         prompt, to measure what the prompt engineering added
 """
+import statistics
+import sys
 import time
 
 from dotenv import load_dotenv
 
 load_dotenv()
 
-from agent import nl_to_sql
+from agent import _generate, nl_to_sql, summarize_result
 from db import connect, get_schema_description, run_query
+
+BASELINE_PROMPT = (
+    "You are a SQL assistant for a SQLite database.\nSchema:\n{schema}\n"
+    "Return one SQLite SELECT query, nothing else."
+)
 
 
 def truth(sql):
@@ -110,14 +119,22 @@ CASES = [
 
 
 def main():
+    baseline = "--baseline" in sys.argv
     schema = get_schema_description()
-    failures = 0
+    failures, timings = 0, []
     for case in CASES:
         q = case["q"]
         try:
-            raw = nl_to_sql(q, schema)
+            start = time.perf_counter()
+            if baseline:
+                raw = _generate(f"Question: {q}", system=BASELINE_PROMPT.format(schema=schema))
+            else:
+                raw = nl_to_sql(q, schema)
             df, sql = run_query(raw)
             got = case["actual"](df)
+            if not baseline:  # full user-facing pipeline includes the written answer
+                summarize_result(q, sql, df)
+                timings.append(time.perf_counter() - start)
             want = case["expected"]()
             ok = case["same"](got, want)
         except Exception as e:
@@ -130,7 +147,11 @@ def main():
             print(f"FAIL  {q}\n      got:      {preview}\n      expected: {str(want)[:110]}")
         time.sleep(4)
 
-    print(f"\n{len(CASES) - failures}/{len(CASES)} passed")
+    mode = "BASELINE (schema-only prompt)" if baseline else "FINAL prompt"
+    print(f"\n[{mode}] {len(CASES) - failures}/{len(CASES)} passed")
+    if timings:
+        print(f"end-to-end per question (SQL + run + written answer): "
+              f"median {statistics.median(timings):.1f}s, max {max(timings):.1f}s")
     raise SystemExit(1 if failures else 0)
 
 
