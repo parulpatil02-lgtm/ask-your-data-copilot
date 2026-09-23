@@ -1,5 +1,5 @@
-streamlit
-google-genai
-pandas
-matplotlib
-python-dotenv
+streamlit==1.64.0
+google-genai==2.25.0
+pandas==3.0.6
+matplotlib==3.11.2
+python-dotenv==1.2.3

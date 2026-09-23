@@ -1,22 +1,25 @@
 """
 Melody: ask-your-data copilot for a digital music store.
 
-A non-technical user types a question in English; this turns it into SQL,
-runs it against a read-only database, and answers back in English with the
-SQL available on request for anyone who wants to audit it.
+A non-technical user types a question in English; Melody turns it into SQL,
+runs it against a read-only database, and answers in English, with the SQL
+available on request for anyone who wants to audit it.
 """
 import matplotlib
+
+matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import pandas as pd
 import streamlit as st
 from dotenv import load_dotenv
 
-matplotlib.use("Agg")
-load_dotenv()  # picks up GEMINI_API_KEY from a local .env file; no-op if none exists
-
 from agent import AGENT_NAME, nl_to_sql, summarize_result
-from db import SQLValidationError, get_schema_description, run_query
+from db import MAX_ROWS, SQLValidationError, get_schema_description, run_query
 
+load_dotenv()  # local GEMINI_API_KEY from .env; a no-op when deployed
+
+MAX_QUESTIONS_PER_SESSION = 20  # protects the free API quota on a public deployment
+ACCENT = "#1F6F5C"
 EXAMPLE_QUESTIONS = [
     "What are the top 5 best-selling genres by revenue?",
     "Which 5 customers have spent the most money in total?",
@@ -33,25 +36,35 @@ def cached_schema() -> str:
     return get_schema_description()
 
 
+def friendly_llm_error(e: Exception) -> str:
+    text = str(e)
+    if "429" in text or "RESOURCE_EXHAUSTED" in text or "quota" in text.lower():
+        return (
+            f"{AGENT_NAME} has hit the free API quota for now. This demo runs on a free "
+            "tier, so please try again in a few minutes (or tomorrow)."
+        )
+    return f"Couldn't reach the language model: {text[:200]}"
+
+
 def render_result(df: pd.DataFrame):
     if df.empty:
-        st.info("Query ran successfully but returned no rows.")
+        st.info("The query ran successfully but returned no rows.")
         return
 
-    numeric_cols = df.select_dtypes(include="number").columns.tolist()
-    text_cols = [c for c in df.columns if c not in numeric_cols]
+    numeric = df.select_dtypes(include="number").columns.tolist()
+    labels = [c for c in df.columns if c not in numeric]
 
-    if len(df.columns) == 2 and len(numeric_cols) == 1 and len(text_cols) == 1 and len(df) > 1:
-        label_col, value_col = text_cols[0], numeric_cols[0]
+    if len(df) > 1 and len(numeric) == 1 and len(labels) == 1:
         fig, ax = plt.subplots(figsize=(6, 3.2))
-        ax.bar(df[label_col].astype(str), df[value_col], color="#1F6F5C")
-        ax.set_ylabel(value_col)
+        ax.bar(df[labels[0]].astype(str), df[numeric[0]], color=ACCENT)
+        ax.set_ylabel(numeric[0])
         ax.spines[["top", "right"]].set_visible(False)
         plt.xticks(rotation=30, ha="right")
         fig.tight_layout()
         st.pyplot(fig)
+        plt.close(fig)
     else:
-        st.dataframe(df, use_container_width=True)
+        st.dataframe(df, width="stretch")
 
 
 st.title(f"🎵 {AGENT_NAME}")
@@ -70,22 +83,12 @@ question = st.text_input(
     key="question_input",
     placeholder="e.g. What are the top 5 best-selling genres by revenue?",
 )
-ask = st.button("Ask", type="primary")
 
-MAX_QUESTIONS_PER_SESSION = 20  # protects the free API quota on a public deployment
+if st.button("Ask", type="primary"):
+    if not question.strip():
+        st.warning("Type a question first.")
+        st.stop()
 
-
-def friendly_llm_error(e: Exception) -> str:
-    text = str(e)
-    if "429" in text or "RESOURCE_EXHAUSTED" in text or "quota" in text.lower():
-        return (
-            f"{AGENT_NAME} has hit the free API quota for now. This demo runs on a free "
-            "tier, so please try again in a few minutes (or tomorrow)."
-        )
-    return f"Couldn't reach the language model: {text[:200]}"
-
-
-if ask and question.strip():
     st.session_state["asked"] = st.session_state.get("asked", 0) + 1
     if st.session_state["asked"] > MAX_QUESTIONS_PER_SESSION:
         st.warning(
@@ -94,25 +97,23 @@ if ask and question.strip():
         )
         st.stop()
 
-    schema = cached_schema()
-
     with st.spinner(f"{AGENT_NAME} is writing the query..."):
         try:
-            raw_sql = nl_to_sql(question, schema)
+            raw_sql = nl_to_sql(question, cached_schema())
         except Exception as e:
             st.error(friendly_llm_error(e))
             st.stop()
 
     if raw_sql.upper().startswith("NO_QUERY"):
-        reason = raw_sql.split(":", 1)[1].strip() if ":" in raw_sql else "This can't be answered from this data."
+        reason = raw_sql.partition(":")[2].strip() or "This can't be answered from this data."
         st.warning(f"**{AGENT_NAME} can't answer that:** {reason}")
         st.stop()
 
     try:
         df, safe_sql = run_query(raw_sql)
     except SQLValidationError as e:
-        st.error(f"**Blocked before it ran** — this query didn't pass the safety check: {e}")
-        with st.expander("What the model generated (blocked)"):
+        st.error(f"**Not run** — the generated query failed the safety check: {e}")
+        with st.expander("What the model generated"):
             st.code(raw_sql, language="sql")
         st.stop()
     except Exception as e:
@@ -125,14 +126,11 @@ if ask and question.strip():
         try:
             answer = summarize_result(question, safe_sql, df)
         except Exception:
-            answer = f"Found {len(df)} row(s) — see the table below."
+            answer = f"Found {len(df)} row(s) — see below."
 
-    st.subheader(answer.replace("$", "\\$"))  # bare $ would render as LaTeX math
+    st.subheader(answer.replace("$", "\\$"))  # a bare $ would render as LaTeX math
     render_result(df)
 
     with st.expander("View generated SQL (for auditability)"):
         st.code(safe_sql, language="sql")
-        st.caption(f"{len(df)} row(s) returned, capped at 200 for display.")
-
-elif ask:
-    st.warning("Type a question first.")
+        st.caption(f"{len(df)} row(s) returned (display capped at {MAX_ROWS}).")

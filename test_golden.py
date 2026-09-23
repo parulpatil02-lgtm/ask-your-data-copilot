@@ -14,15 +14,12 @@ from dotenv import load_dotenv
 load_dotenv()
 
 from agent import nl_to_sql
-from db import get_connection, get_schema_description, run_query
+from db import connect, get_schema_description, run_query
 
 
 def truth(sql):
-    conn = get_connection()
-    try:
+    with connect() as conn:
         return conn.execute(sql).fetchall()
-    finally:
-        conn.close()
 
 
 def col0_list(df):
@@ -77,7 +74,12 @@ CASES = [
     ),
     dict(
         q="What percentage of our revenue comes from the top 3 genres?",
-        expected=lambda: 63.13,
+        expected=lambda: truth(
+            "WITH r AS (SELECT SUM(il.UnitPrice*il.Quantity) v FROM Genre g "
+            "JOIN Track t ON t.GenreId=g.GenreId JOIN InvoiceLine il ON il.TrackId=t.TrackId "
+            "GROUP BY g.GenreId) "
+            "SELECT 100.0*(SELECT SUM(v) FROM (SELECT v FROM r ORDER BY v DESC LIMIT 3))"
+            "/(SELECT SUM(v) FROM r)")[0][0],
         actual=scalar,
         same=lambda a, e: abs(a - e) < 0.05,
     ),

@@ -16,7 +16,8 @@ question ──► Gemini writes one SELECT ──► validator ──► read-o
 ```
 
 1. **Text-to-SQL.** The model receives the live database schema (tables, columns,
-   foreign keys) plus business rules (how revenue is defined, what "today" means).
+   foreign keys) plus business rules (how revenue is defined, what "today" means)
+   as a system instruction, kept separate from the user's text.
 2. **Validation.** Only a single `SELECT` / `WITH … SELECT` passes. Comments and
    quoted text are stripped before scanning, so searching for a track called
    "Create" isn't mistaken for a `CREATE` statement.
@@ -28,23 +29,27 @@ question ──► Gemini writes one SELECT ──► validator ──► read-o
 ## Safety, and how it's tested
 
 Two independent layers: the validator, and an engine-level read-only connection.
-`test_guardrails.py` runs 19 checks — DROP/DELETE/UPDATE/INSERT/ATTACH/PRAGMA,
-multi-statement injection, comment-hidden statements, `WITH … DELETE` — plus a
-direct attempt to write through the connection. The model itself also refused
+`test_guardrails.py` runs 23 checks — DROP/DELETE/UPDATE/INSERT/REPLACE INTO/
+ATTACH/PRAGMA, multi-statement injection, comment-hidden statements,
+`WITH … DELETE` — plus legitimate queries that must still work (searching for
+"Create", using `REPLACE()`, ending in a comment) and a direct attempt to write
+through the connection. The model itself also refused
 both destructive requests I tried ("delete every customer", "drop the Invoice
 table"), but the design doesn't rely on that.
 
 ## Accuracy, and how it's tested
 
 `test_golden.py` pairs 9 business questions with hand-written SQL as ground truth
-and compares results (not wording). **27/27 across three consecutive runs.**
-Honest scope: 9 questions on one database is a small sample, and LLM output is
-non-deterministic, so this catches regressions — it doesn't prove correctness in
-general.
+and compares results (not wording). **27/27 across three consecutive runs, and
+again after a later refactor.** Temperature is set to 0 for repeatability, though
+the API doesn't guarantee identical output. Honest scope: 9 questions on one
+database is a small sample, so this catches regressions — it doesn't prove
+correctness in general.
 
 ## Failure log: what went wrong while building this
 
-Found by deliberately trying to break it, then verifying against the raw data.
+Rows 1–5 were found by deliberately trying to break it and checking against the
+raw data; rows 6–7 came from a final line-by-line code review.
 
 | # | What happened | Root cause | Fix |
 |---|---|---|---|
@@ -53,6 +58,8 @@ Found by deliberately trying to break it, then verifying against the raw data.
 | 3 | A legitimate search (`LIKE '%Create%'`) was **blocked** | Keyword scan matched inside a quoted string | Validator strips string literals and comments before scanning |
 | 4 | "Customers inactive in the last year" was refused | Static dataset has no "now"; the model correctly declined to guess | Inject the latest invoice date (2025-12-22) as "today" |
 | 5 | The answer to "which country has the highest average invoice" was right **by luck** | The summarizer only saw the first 10 rows but made claims about all 24 | Summarizer now receives every row and is told to check any max/min/ranking claim against all of them |
+| 6 | Any query ending in a `-- comment` crashed | The row-cap wrapper put its closing `)` on the same line, so the comment swallowed it | Query is wrapped on its own lines; covered by a test |
+| 7 | `REPLACE()`, a normal string function, was blocked | It sat in the keyword blocklist but added no safety: `REPLACE INTO` is already rejected (not a SELECT) and the connection is read-only | Removed from the blocklist; covered by a test |
 
 ## Known limitations (not fixed)
 
@@ -79,8 +86,8 @@ copy .env.example .env        # then put your free Gemini key in .env
 ```
 
 Get a free key at [aistudio.google.com/apikey](https://aistudio.google.com/apikey).
-Restart the server after editing `agent.py` or `db.py` — Streamlit doesn't reliably
-reload helper modules.
+Restart the server after editing `agent.py` or `db.py` — I saw stale behaviour from
+a long-running server until I did.
 
 ```bash
 .venv\Scripts\python test_guardrails.py   # no API key needed
