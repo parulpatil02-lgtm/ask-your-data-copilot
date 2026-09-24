@@ -43,6 +43,11 @@ def friendly_llm_error(e: Exception) -> str:
             f"{AGENT_NAME} has hit the free API quota for now. This demo runs on a free "
             "tier, so please try again in a few minutes (or tomorrow)."
         )
+    if any(s in text for s in ("503", "UNAVAILABLE", "high demand", "timed out", "Timeout")):
+        return (
+            "Google's free language model is overloaded right now, which is outside "
+            f"{AGENT_NAME}'s control. Please try again in a minute."
+        )
     return f"Couldn't reach the language model: {text[:200]}"
 
 

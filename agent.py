@@ -11,7 +11,8 @@ from google.genai import types
 
 from db import get_reference_date
 
-MODEL = "gemini-flash-lite-latest"
+MODELS = ("gemini-flash-lite-latest", "gemini-flash-latest")  # primary, then fallback
+REQUEST_TIMEOUT_MS = 15_000
 AGENT_NAME = "Melody"
 
 SYSTEM_PROMPT = """You are {name}, a SQL-writing assistant for a digital music
@@ -84,7 +85,12 @@ def get_client() -> genai.Client:
             "No GEMINI_API_KEY found. Set it in a local .env file (see .env.example) "
             "or, when deployed, in Streamlit's Secrets."
         )
-    return genai.Client(api_key=api_key)
+    # Bounded wait: by default the SDK keeps retrying overloaded (503) responses,
+    # which left the app spinning for minutes. Fail fast and say so instead.
+    http_options = types.HttpOptions(
+        timeout=REQUEST_TIMEOUT_MS, retry_options=types.HttpRetryOptions(attempts=1)
+    )
+    return genai.Client(api_key=api_key, http_options=http_options)
 
 
 def _generate(prompt: str, system: str | None = None) -> str:
@@ -94,8 +100,14 @@ def _generate(prompt: str, system: str | None = None) -> str:
         temperature=0,
         automatic_function_calling=types.AutomaticFunctionCallingConfig(disable=True),
     )
-    response = get_client().models.generate_content(model=MODEL, contents=prompt, config=config)
-    return (response.text or "").strip()
+    error = None
+    for model in MODELS:  # try the next model only if this one is overloaded or down
+        try:
+            response = get_client().models.generate_content(model=model, contents=prompt, config=config)
+            return (response.text or "").strip()
+        except Exception as e:
+            error = e
+    raise error
 
 
 def nl_to_sql(question: str, schema: str) -> str:

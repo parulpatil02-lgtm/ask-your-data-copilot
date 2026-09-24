@@ -3,6 +3,10 @@
 **Business users ask a question in plain English and get a checked answer in
 seconds - without joining the analyst queue, and without an AI quietly guessing.**
 
+**Try it live: [melody-ask-your-data.streamlit.app](https://melody-ask-your-data.streamlit.app/)**
+It runs on a free API tier, so it can be slow to wake up, and briefly unavailable
+when Google's free model is overloaded (it says so rather than hanging).
+
 ## The business problem
 
 Every analytics team has the same bottleneck: business users need one-off numbers,
@@ -33,7 +37,7 @@ silently in specific, predictable ways.** "Average tracks per playlist" came bac
 **622.5**; the true answer is **484.2** (it dropped 4 empty playlists from the
 denominator). It read as a perfectly reasonable answer, which is what makes it
 dangerous. The [failure log](#failure-log-what-went-wrong-while-building-this) below
-covers seven such cases.
+covers eight problems found while building and deploying it.
 
 ## What changed
 
@@ -85,8 +89,9 @@ rely on that.
 
 ## Failure log: what went wrong while building this
 
-Rows 1–5 were found by deliberately trying to break it and checking against the
-raw data; rows 6–7 came from a final line-by-line code review.
+Rows 1-5 were found by deliberately trying to break it and checking against the
+raw data; rows 6-7 came from a final line-by-line code review; row 8 came from the
+first test of the live deployment.
 
 | # | What happened | Root cause | Fix |
 |---|---|---|---|
@@ -97,6 +102,7 @@ raw data; rows 6–7 came from a final line-by-line code review.
 | 5 | The answer to "which country has the highest average invoice" was right **by luck** | The summarizer only saw the first 10 rows but made claims about all 24 | Summarizer now receives every row and is told to check any max/min/ranking claim against all of them |
 | 6 | Any query ending in a `-- comment` crashed | The row-cap wrapper put its closing `)` on the same line, so the comment swallowed it | Query is wrapped on its own lines; covered by a test |
 | 7 | `REPLACE()`, a normal string function, was blocked | It sat in the keyword blocklist but added no safety: `REPLACE INTO` is already rejected (not a SELECT) and the connection is read-only | Removed from the blocklist; covered by a test |
+| 8 | The live app sat spinning for minutes with no message | Google's free model returned 503 "high demand"; the SDK silently retried instead of failing | 15 s timeout, no silent retries, one fallback model, and a plain "model is overloaded, try again in a minute" message |
 
 ## Known limitations (not fixed)
 
@@ -107,8 +113,11 @@ raw data; rows 6–7 came from a final line-by-line code review.
   multi-part questions are largely untested.
 - **Not fully deterministic.** Temperature is 0, yet the baseline's failures varied
   between runs, so re-run `test_golden.py` after any prompt or model change.
-- **Model alias.** It uses `gemini-flash-lite-latest`; when Google moves the alias,
-  behaviour can change.
+- **Model alias and fallback.** It uses `gemini-flash-lite-latest`, falling back to
+  `gemini-flash-latest` if that is unavailable. The golden suite has only been run
+  on the primary, and when Google moves an alias, behaviour can change.
+- **Provider outages.** When Google's free models are overloaded, the app cannot
+  answer; it now says so within about 15 seconds rather than hanging.
 - **Free-tier quota.** The public demo runs on a free API tier, so it can be
   rate-limited; sessions are capped at 20 questions and the app says so plainly.
 - **Results capped at 200 rows.**
